@@ -1,0 +1,15 @@
+[package]
+name = "icon-marker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.31"
+image = "0.25"
+imageproc = "0.25"
+ab_glyph = "0.2"
+ico = "0.3"
+rfd = "0.15"
+
+[build-dependencies]
+winres = "0.1"
