@@ -7,6 +7,9 @@ use std::fs::File;
 
 fn load_font() -> FontVec {
     let candidates = [
+        concat!(env!("CARGO_MANIFEST_DIR"), r"\fonts\AoboshiOne-Regular.ttf"),
+        r"C:\Users\koya\AppData\Local\Microsoft\Windows\Fonts\AoboshiOne-Regular.ttf",
+        r"C:\Windows\Fonts\AoboshiOne-Regular.ttf",
         r"C:\Windows\Fonts\meiryob.ttc",
         r"C:\Windows\Fonts\YuGothB.ttc",
         r"C:\Windows\Fonts\msgothic.ttc",
@@ -36,25 +39,35 @@ fn lerp_color(a: [u8; 4], b: [u8; 4], t: f32) -> Rgba<u8> {
     ])
 }
 
-fn draw_chevron_pattern(img: &mut RgbaImage, base: [u8; 3], size: u32) {
-    let line_color = Rgba([
-        base[0].saturating_add(8),
-        base[1].saturating_add(5),
-        base[2].saturating_add(2),
-        255,
-    ]);
-    let spacing = (size as f32 / 32.0).max(4.0) as i32;
-    let half = spacing / 2;
+fn draw_chevron_pattern(img: &mut RgbaImage, size: u32) {
+    let width = size as i32;
+    let height = size as i32;
 
-    for y in 0..size as i32 {
-        for x in 0..size as i32 {
-            let row = y / half;
-            let offset = if row % 2 == 0 { 0 } else { half };
-            let lx = (x + offset) % spacing;
-            let ly = y % half;
-            let on_line = (lx - ly).abs() <= 1 || (lx + ly - half).abs() <= 1;
-            if on_line {
-                img.put_pixel(x as u32, y as u32, line_color);
+    let spacing = 6;
+    let zigzag_period = 20;
+
+    for y in 0..height {
+        for x in 0..width {
+            let half = zigzag_period / 2;
+            let zigzag = ((x % zigzag_period) - half).abs();
+            let pattern_y = (y + zigzag).rem_euclid(spacing);
+
+            let bg = *img.get_pixel(x as u32, y as u32);
+
+            if pattern_y == 0 {
+                img.put_pixel(x as u32, y as u32, Rgba([
+                    bg[0].saturating_add(10),
+                    bg[1].saturating_add(10),
+                    bg[2].saturating_add(10),
+                    255,
+                ]));
+            } else if pattern_y == 1 {
+                img.put_pixel(x as u32, y as u32, Rgba([
+                    bg[0].saturating_sub(6),
+                    bg[1].saturating_sub(6),
+                    bg[2].saturating_sub(6),
+                    255,
+                ]));
             }
         }
     }
@@ -87,7 +100,7 @@ fn measure_text_bbox(font: &FontVec, text: &str, scale: f32, canvas: u32) -> Opt
 }
 
 fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
-    let bg_rgb = [245u8, 222, 199];
+    let bg_rgb = [242u8, 220, 198];
     let grad_start = [120u8, 90, 220, 255];
     let grad_end = [20u8, 170, 130, 255];
     let padding: f32 = 0.16;
@@ -95,7 +108,7 @@ fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
     let bg = Rgba([bg_rgb[0], bg_rgb[1], bg_rgb[2], 255]);
     let mut img = RgbaImage::from_pixel(size, size, bg);
 
-    draw_chevron_pattern(&mut img, bg_rgb, size);
+    draw_chevron_pattern(&mut img, size);
 
     let ref_scale = 200.0_f32;
     let ref_canvas = 512u32;
@@ -111,15 +124,16 @@ fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
     let final_scale = ref_scale * ratio;
 
     let white = Rgba([255u8, 255, 255, 255]);
-    let mut text_layer = RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
+    let tmp_size = size * 2;
+    let mut text_layer = RgbaImage::from_pixel(tmp_size, tmp_size, Rgba([0, 0, 0, 0]));
     draw_text_mut(&mut text_layer, white, 0, 0, PxScale::from(final_scale), font, text);
 
-    let mut min_x = size;
-    let mut min_y = size;
+    let mut min_x = tmp_size;
+    let mut min_y = tmp_size;
     let mut max_x = 0u32;
     let mut max_y = 0u32;
-    for y in 0..size {
-        for x in 0..size {
+    for y in 0..tmp_size {
+        for x in 0..tmp_size {
             if text_layer.get_pixel(x, y)[3] > 0 {
                 min_x = min_x.min(x);
                 min_y = min_y.min(y);
@@ -138,12 +152,12 @@ fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
         for x in 0..size {
             let src_x = x as i32 - offset_x;
             let src_y = y as i32 - offset_y;
-            if src_x < 0 || src_y < 0 || src_x >= size as i32 || src_y >= size as i32 {
+            if src_x < 0 || src_y < 0 || src_x >= tmp_size as i32 || src_y >= tmp_size as i32 {
                 continue;
             }
             let tp = text_layer.get_pixel(src_x as u32, src_y as u32);
             if tp[3] > 0 {
-                let t = ((x as f32 + y as f32) / (2.0 * size as f32)).clamp(0.0, 1.0);
+                let t = ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32)).clamp(0.0, 1.0);
                 let grad = lerp_color(grad_start, grad_end, t);
                 let alpha = tp[3] as f32 / 255.0;
                 let bg_px = img.get_pixel(x, y);
