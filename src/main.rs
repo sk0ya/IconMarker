@@ -44,31 +44,43 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Rgba<u8> {
     ])
 }
 
-/// Draw chevron (herringbone) pattern on background
-fn draw_chevron_pattern(img: &mut RgbaImage, base: Color32, size: u32) {
-    let line_color = Rgba([
-        base.r().saturating_add(8),
-        base.g().saturating_add(5),
-        base.b().saturating_add(2),
-        255,
-    ]);
-    let spacing = (size as f32 / 32.0).max(4.0) as i32;
-    let half = spacing / 2;
+fn draw_chevron_pattern(img: &mut RgbaImage, _base: Color32, size: u32) {
+    let width = size as i32;
+    let height = size as i32;
 
-    for y in 0..size as i32 {
-        for x in 0..size as i32 {
-            let row = y / half;
-            let offset = if row % 2 == 0 { 0 } else { half };
-            let lx = (x + offset) % spacing;
-            let ly = y % half;
-            // V-shape pattern
-            let on_line = (lx - ly).abs() <= 1 || (lx + ly - half).abs() <= 1;
-            if on_line {
-                img.put_pixel(x as u32, y as u32, line_color);
+    let spacing = 6;          // 線の間隔
+    let zigzag_period = 20;   // ジグザグ1周期の幅（px）
+
+    for y in 0..height {
+        for x in 0..width {
+            // 三角波（繰り返しジグザグ）で複数のV字折り返しを作る
+            let half = zigzag_period / 2;
+            let zigzag = ((x % zigzag_period) - half).abs();
+            let pattern_y = (y + zigzag).rem_euclid(spacing);
+
+            let bg = *img.get_pixel(x as u32, y as u32);
+
+            if pattern_y == 0 {
+                // 微かなハイライト線
+                img.put_pixel(x as u32, y as u32, Rgba([
+                    bg[0].saturating_add(10),
+                    bg[1].saturating_add(10),
+                    bg[2].saturating_add(10),
+                    255,
+                ]));
+            } else if pattern_y == 1 {
+                // ハイライト直下の微かなシャドウで立体感を出す
+                img.put_pixel(x as u32, y as u32, Rgba([
+                    bg[0].saturating_sub(6),
+                    bg[1].saturating_sub(6),
+                    bg[2].saturating_sub(6),
+                    255,
+                ]));
             }
         }
     }
 }
+
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -99,7 +111,7 @@ impl IconMarkerApp {
     fn new() -> Self {
         Self {
             text: "G".to_string(),
-            bg_color: Color32::from_rgb(245, 222, 199),
+            bg_color: Color32::from_rgb(242, 220, 198),
             grad_start: Color32::from_rgb(120, 90, 220),
             grad_end: Color32::from_rgb(20, 170, 130),
             padding: 0.16,
