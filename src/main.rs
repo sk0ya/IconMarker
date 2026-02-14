@@ -119,8 +119,8 @@ impl IconMarkerApp {
         Self {
             text: "G".to_string(),
             bg_color: Color32::from_rgb(242, 220, 198),
-            grad_start: Color32::from_rgb(130, 80, 210),
-            grad_end: Color32::from_rgb(15, 170, 120),
+            grad_start: Color32::from_rgb(120, 90, 220),
+            grad_end: Color32::from_rgb(20, 170, 130),
             padding: 0.16,
             chevron_on: true,
             texture: None,
@@ -225,7 +225,7 @@ impl IconMarkerApp {
                 }
                 let tp = text_layer.get_pixel(src_x as u32, src_y as u32);
                 if tp[3] > 0 {
-                    let t = ((x as f32 + y as f32) / (2.0 * size as f32)).clamp(0.0, 1.0);
+                    let t = ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32)).clamp(0.0, 1.0);
                     let grad = lerp_color(self.grad_start, self.grad_end, t);
                     let alpha = tp[3] as f32 / 255.0;
                     let bg_px = img.get_pixel(x, y);
