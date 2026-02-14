@@ -14,7 +14,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 fn load_font() -> FontVec {
+    // Aoboshi One を優先的に探す
     let candidates = [
+        // バンドルフォント (exe と同じディレクトリの fonts/)
+        concat!(env!("CARGO_MANIFEST_DIR"), r"\fonts\AoboshiOne-Regular.ttf"),
+        // システムフォント (ユーザーインストール)
+        r"C:\Users\koya\AppData\Local\Microsoft\Windows\Fonts\AoboshiOne-Regular.ttf",
+        r"C:\Windows\Fonts\AoboshiOne-Regular.ttf",
+        // フォールバック
         r"C:\Windows\Fonts\meiryob.ttc",
         r"C:\Windows\Fonts\YuGothB.ttc",
         r"C:\Windows\Fonts\msgothic.ttc",
@@ -112,8 +119,8 @@ impl IconMarkerApp {
         Self {
             text: "G".to_string(),
             bg_color: Color32::from_rgb(242, 220, 198),
-            grad_start: Color32::from_rgb(120, 90, 220),
-            grad_end: Color32::from_rgb(20, 170, 130),
+            grad_start: Color32::from_rgb(130, 80, 210),
+            grad_end: Color32::from_rgb(15, 170, 120),
             padding: 0.16,
             chevron_on: true,
             texture: None,
@@ -180,18 +187,19 @@ impl IconMarkerApp {
         let ratio = (target / ref_w).min(target / ref_h);
         let final_scale = ref_scale * ratio;
 
-        // Step 3: Render at final scale, measure again for precise centering
+        // Step 3: Render at final scale on an oversized canvas to avoid clipping
         let white = Rgba([255u8, 255, 255, 255]);
-        let mut text_layer = RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
+        let tmp_size = size * 2;
+        let mut text_layer = RgbaImage::from_pixel(tmp_size, tmp_size, Rgba([0, 0, 0, 0]));
         draw_text_mut(&mut text_layer, white, 0, 0, PxScale::from(final_scale), font, &self.text);
 
         // Find actual bounds at final scale
-        let mut min_x = size;
-        let mut min_y = size;
+        let mut min_x = tmp_size;
+        let mut min_y = tmp_size;
         let mut max_x = 0u32;
         let mut max_y = 0u32;
-        for y in 0..size {
-            for x in 0..size {
+        for y in 0..tmp_size {
+            for x in 0..tmp_size {
                 if text_layer.get_pixel(x, y)[3] > 0 {
                     min_x = min_x.min(x);
                     min_y = min_y.min(y);
@@ -212,7 +220,7 @@ impl IconMarkerApp {
             for x in 0..size {
                 let src_x = x as i32 - offset_x;
                 let src_y = y as i32 - offset_y;
-                if src_x < 0 || src_y < 0 || src_x >= size as i32 || src_y >= size as i32 {
+                if src_x < 0 || src_y < 0 || src_x >= tmp_size as i32 || src_y >= tmp_size as i32 {
                     continue;
                 }
                 let tp = text_layer.get_pixel(src_x as u32, src_y as u32);
