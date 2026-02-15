@@ -278,7 +278,12 @@ impl IconMarkerApp {
                     image::imageops::resize(&base_img, s, s, FilterType::Lanczos3)
                 };
                 let icon_image = IconImage::from_rgba_data(s, s, resized.into_raw());
-                match IconDirEntry::encode_as_png(&icon_image) {
+                let entry_result = if s >= 256 {
+                    IconDirEntry::encode_as_png(&icon_image)
+                } else {
+                    IconDirEntry::encode_as_bmp(&icon_image)
+                };
+                match entry_result {
                     Ok(entry) => icon_dir.add_entry(entry),
                     Err(e) => {
                         self.status_msg = format!("Error encoding {s}x{s}: {e}");
