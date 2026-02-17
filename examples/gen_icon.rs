@@ -1,9 +1,9 @@
 use ab_glyph::{FontVec, PxScale};
-use ico::{IconDir, IconDirEntry, IconImage, ResourceType};
 use image::imageops::FilterType;
-use image::{Rgba, RgbaImage};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use std::fs::File;
+use std::io::{Cursor, Write};
 
 fn load_font() -> FontVec {
     let candidates = [
@@ -187,20 +187,111 @@ fn main() {
     // Save ICO
     let ico_path = "icon.ico";
     let sizes: &[u32] = &[16, 32, 48, 256];
-    let mut icon_dir = IconDir::new(ResourceType::Icon);
+    write_ico(ico_path, &base_img, sizes).expect("Failed to write ICO");
+    println!("Saved {ico_path}");
+}
+
+/// Write an ICO file with multiple sizes.
+/// Small sizes use 32-bit BGRA BMP DIB, 256x256 uses RGBA PNG.
+fn write_ico(
+    path: &str,
+    base_img: &RgbaImage,
+    sizes: &[u32],
+) -> std::io::Result<()> {
+    struct IcoEntry {
+        width: u8,
+        height: u8,
+        planes: u16,
+        bpp: u16,
+        data: Vec<u8>,
+    }
+
+    let mut entries = Vec::new();
 
     for &s in sizes {
         let resized = if s == 256 {
             base_img.clone()
         } else {
-            image::imageops::resize(&base_img, s, s, FilterType::Lanczos3)
+            image::imageops::resize(base_img, s, s, FilterType::Lanczos3)
         };
-        let icon_image = IconImage::from_rgba_data(s, s, resized.into_raw());
-        let entry = IconDirEntry::encode_as_png(&icon_image).expect("Failed to encode icon");
-        icon_dir.add_entry(entry);
+
+        if s >= 256 {
+            let mut buf = Cursor::new(Vec::new());
+            DynamicImage::ImageRgba8(resized)
+                .write_to(&mut buf, ImageFormat::Png)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            entries.push(IcoEntry {
+                width: 0,
+                height: 0,
+                planes: 1,
+                bpp: 32,
+                data: buf.into_inner(),
+            });
+        } else {
+            let mut data = Vec::new();
+
+            // BITMAPINFOHEADER (40 bytes)
+            data.extend_from_slice(&40u32.to_le_bytes());
+            data.extend_from_slice(&(s as i32).to_le_bytes());
+            data.extend_from_slice(&(2 * s as i32).to_le_bytes()); // height doubled
+            data.extend_from_slice(&1u16.to_le_bytes());
+            data.extend_from_slice(&32u16.to_le_bytes());
+            data.extend_from_slice(&0u32.to_le_bytes()); // compression
+            data.extend_from_slice(&0u32.to_le_bytes()); // image size
+            data.extend_from_slice(&0i32.to_le_bytes()); // x ppm
+            data.extend_from_slice(&0i32.to_le_bytes()); // y ppm
+            data.extend_from_slice(&0u32.to_le_bytes()); // colors used
+            data.extend_from_slice(&0u32.to_le_bytes()); // colors important
+
+            // XOR pixel data: BGRA, bottom-up
+            for row in (0..s).rev() {
+                for col in 0..s {
+                    let px = resized.get_pixel(col, row);
+                    data.push(px[2]); // B
+                    data.push(px[1]); // G
+                    data.push(px[0]); // R
+                    data.push(px[3]); // A
+                }
+            }
+
+            // AND mask: all zeros, rows padded to 4-byte boundary
+            let mask_row_bytes = ((s + 31) / 32) * 4;
+            data.extend(std::iter::repeat(0u8).take((mask_row_bytes * s) as usize));
+
+            entries.push(IcoEntry {
+                width: s as u8,
+                height: s as u8,
+                planes: 1,
+                bpp: 32,
+                data,
+            });
+        }
     }
 
-    let file = File::create(ico_path).expect("Failed to create ICO file");
-    icon_dir.write(file).expect("Failed to write ICO");
-    println!("Saved {ico_path}");
+    let mut file = File::create(path)?;
+    let count = entries.len() as u16;
+
+    // ICONDIR header
+    file.write_all(&0u16.to_le_bytes())?;
+    file.write_all(&1u16.to_le_bytes())?;
+    file.write_all(&count.to_le_bytes())?;
+
+    let dir_end = 6u32 + 16 * count as u32;
+    let mut offset = dir_end;
+
+    // ICONDIRENTRY for each image
+    for entry in &entries {
+        file.write_all(&[entry.width, entry.height, 0, 0])?;
+        file.write_all(&entry.planes.to_le_bytes())?;
+        file.write_all(&entry.bpp.to_le_bytes())?;
+        file.write_all(&(entry.data.len() as u32).to_le_bytes())?;
+        file.write_all(&offset.to_le_bytes())?;
+        offset += entry.data.len() as u32;
+    }
+
+    for entry in &entries {
+        file.write_all(&entry.data)?;
+    }
+
+    Ok(())
 }

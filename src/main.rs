@@ -4,12 +4,12 @@ use ab_glyph::{FontVec, PxScale};
 use eframe::egui;
 use egui::color_picker::{color_edit_button_srgba, Alpha};
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
-use ico::{IconDir, IconDirEntry, IconImage, ResourceType};
 use image::imageops::FilterType;
-use image::{Rgba, RgbaImage};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use rfd::FileDialog;
 use std::fs::File;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -269,35 +269,10 @@ impl IconMarkerApp {
             let path = ensure_extension(path, "ico");
             let base_img = self.generate_image(256);
             let sizes: &[u32] = &[16, 32, 48, 256];
-            let mut icon_dir = IconDir::new(ResourceType::Icon);
 
-            for &s in sizes {
-                let resized = if s == 256 {
-                    base_img.clone()
-                } else {
-                    image::imageops::resize(&base_img, s, s, FilterType::Lanczos3)
-                };
-                let icon_image = IconImage::from_rgba_data(s, s, resized.into_raw());
-                let entry_result = if s >= 256 {
-                    IconDirEntry::encode_as_png(&icon_image)
-                } else {
-                    IconDirEntry::encode_as_bmp(&icon_image)
-                };
-                match entry_result {
-                    Ok(entry) => icon_dir.add_entry(entry),
-                    Err(e) => {
-                        self.status_msg = format!("Error encoding {s}x{s}: {e}");
-                        return;
-                    }
-                }
-            }
-
-            match File::create(&path) {
-                Ok(file) => match icon_dir.write(file) {
-                    Ok(_) => self.status_msg = format!("ICO saved: {}", path.display()),
-                    Err(e) => self.status_msg = format!("Error writing ICO: {e}"),
-                },
-                Err(e) => self.status_msg = format!("Error creating file: {e}"),
+            match write_ico(&path, &base_img, sizes) {
+                Ok(_) => self.status_msg = format!("ICO saved: {}", path.display()),
+                Err(e) => self.status_msg = format!("Error writing ICO: {e}"),
             }
         }
     }
@@ -407,6 +382,117 @@ impl eframe::App for IconMarkerApp {
             self.update_preview(ctx);
         }
     }
+}
+
+/// Write an ICO file with multiple sizes.
+/// Small sizes use 32-bit BGRA BMP DIB, 256x256 uses RGBA PNG.
+fn write_ico(
+    path: &std::path::Path,
+    base_img: &RgbaImage,
+    sizes: &[u32],
+) -> std::io::Result<()> {
+    // Prepare image data for each size
+    struct IcoEntry {
+        width: u8,  // 0 means 256
+        height: u8,
+        planes: u16,
+        bpp: u16,
+        data: Vec<u8>,
+    }
+
+    let mut entries = Vec::new();
+
+    for &s in sizes {
+        let resized = if s == 256 {
+            base_img.clone()
+        } else {
+            image::imageops::resize(base_img, s, s, FilterType::Lanczos3)
+        };
+
+        if s >= 256 {
+            // Encode as RGBA PNG
+            let mut buf = Cursor::new(Vec::new());
+            DynamicImage::ImageRgba8(resized)
+                .write_to(&mut buf, ImageFormat::Png)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            entries.push(IcoEntry {
+                width: 0,
+                height: 0,
+                planes: 1,
+                bpp: 32,
+                data: buf.into_inner(),
+            });
+        } else {
+            // Encode as 32-bit BGRA BMP DIB
+            let mut data = Vec::new();
+
+            // BITMAPINFOHEADER (40 bytes)
+            data.extend_from_slice(&40u32.to_le_bytes()); // biSize
+            data.extend_from_slice(&(s as i32).to_le_bytes()); // biWidth
+            data.extend_from_slice(&(2 * s as i32).to_le_bytes()); // biHeight (doubled)
+            data.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
+            data.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
+            data.extend_from_slice(&0u32.to_le_bytes()); // biCompression
+            data.extend_from_slice(&0u32.to_le_bytes()); // biSizeImage
+            data.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
+            data.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
+            data.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
+            data.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
+
+            // XOR pixel data: BGRA, bottom-up row order
+            for row in (0..s).rev() {
+                for col in 0..s {
+                    let px = resized.get_pixel(col, row);
+                    data.push(px[2]); // B
+                    data.push(px[1]); // G
+                    data.push(px[0]); // R
+                    data.push(px[3]); // A
+                }
+            }
+
+            // AND mask: all zeros (fully opaque), rows padded to 4-byte boundary
+            let mask_row_bytes = ((s + 31) / 32) * 4;
+            data.extend(std::iter::repeat(0u8).take((mask_row_bytes * s) as usize));
+
+            entries.push(IcoEntry {
+                width: s as u8,
+                height: s as u8,
+                planes: 1,
+                bpp: 32,
+                data,
+            });
+        }
+    }
+
+    // Write ICO file
+    let mut file = File::create(path)?;
+    let count = entries.len() as u16;
+
+    // ICONDIR header (6 bytes)
+    file.write_all(&0u16.to_le_bytes())?; // idReserved
+    file.write_all(&1u16.to_le_bytes())?; // idType = ICO
+    file.write_all(&count.to_le_bytes())?; // idCount
+
+    // Calculate data offsets
+    let dir_end = 6u32 + 16 * count as u32;
+    let mut offset = dir_end;
+
+    // ICONDIRENTRY for each image (16 bytes each)
+    for entry in &entries {
+        file.write_all(&[entry.width, entry.height, 0, 0])?; // w, h, colorCount, reserved
+        file.write_all(&entry.planes.to_le_bytes())?; // wPlanes
+        file.write_all(&entry.bpp.to_le_bytes())?; // wBitCount
+        file.write_all(&(entry.data.len() as u32).to_le_bytes())?; // dwBytesInRes
+        file.write_all(&offset.to_le_bytes())?; // dwImageOffset
+        offset += entry.data.len() as u32;
+    }
+
+    // Image data
+    for entry in &entries {
+        file.write_all(&entry.data)?;
+    }
+
+    Ok(())
 }
 
 fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
