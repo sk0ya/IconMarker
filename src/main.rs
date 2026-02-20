@@ -427,19 +427,22 @@ fn write_ico(
             let mut data = Vec::new();
 
             // BITMAPINFOHEADER (40 bytes)
+            // Vista-style 32-bit ICO: biHeight = actual height (not doubled),
+            // no AND mask — transparency is carried by the alpha channel.
+            let pixel_bytes = (s * s * 4) as u32;
             data.extend_from_slice(&40u32.to_le_bytes()); // biSize
             data.extend_from_slice(&(s as i32).to_le_bytes()); // biWidth
-            data.extend_from_slice(&(2 * s as i32).to_le_bytes()); // biHeight (doubled)
+            data.extend_from_slice(&(s as i32).to_le_bytes()); // biHeight (actual, not doubled)
             data.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
             data.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
-            data.extend_from_slice(&0u32.to_le_bytes()); // biCompression
-            data.extend_from_slice(&0u32.to_le_bytes()); // biSizeImage
+            data.extend_from_slice(&0u32.to_le_bytes()); // biCompression (BI_RGB)
+            data.extend_from_slice(&pixel_bytes.to_le_bytes()); // biSizeImage
             data.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
             data.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
             data.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
             data.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
 
-            // XOR pixel data: BGRA, bottom-up row order
+            // Pixel data: BGRA, bottom-up row order
             for row in (0..s).rev() {
                 for col in 0..s {
                     let px = resized.get_pixel(col, row);
@@ -449,10 +452,7 @@ fn write_ico(
                     data.push(px[3]); // A
                 }
             }
-
-            // AND mask: all zeros (fully opaque), rows padded to 4-byte boundary
-            let mask_row_bytes = ((s + 31) / 32) * 4;
-            data.extend(std::iter::repeat(0u8).take((mask_row_bytes * s) as usize));
+            // No AND mask: 32-bit Vista-style ICO uses alpha channel instead.
 
             entries.push(IcoEntry {
                 width: s as u8,
