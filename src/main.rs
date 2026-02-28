@@ -4,7 +4,6 @@ use ab_glyph::{FontVec, PxScale};
 use eframe::egui;
 use egui::color_picker::{color_edit_button_srgba, Alpha};
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
-use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use rfd::FileDialog;
@@ -267,10 +266,13 @@ impl IconMarkerApp {
             .save_file()
         {
             let path = ensure_extension(path, "ico");
-            let base_img = self.generate_image(256);
             let sizes: &[u32] = &[16, 32, 48, 256];
+            let images: Vec<(u32, RgbaImage)> = sizes
+                .iter()
+                .map(|&s| (s, self.generate_image(s)))
+                .collect();
 
-            match write_ico(&path, &base_img, sizes) {
+            match write_ico(&path, &images) {
                 Ok(_) => self.status_msg = format!("ICO saved: {}", path.display()),
                 Err(e) => self.status_msg = format!("Error writing ICO: {e}"),
             }
@@ -385,11 +387,11 @@ impl eframe::App for IconMarkerApp {
 }
 
 /// Write an ICO file with multiple sizes.
+/// Each image must already be rendered at the correct size.
 /// Small sizes use 32-bit BGRA BMP DIB, 256x256 uses RGBA PNG.
 fn write_ico(
     path: &std::path::Path,
-    base_img: &RgbaImage,
-    sizes: &[u32],
+    images: &[(u32, RgbaImage)],
 ) -> std::io::Result<()> {
     // Prepare image data for each size
     struct IcoEntry {
@@ -402,17 +404,13 @@ fn write_ico(
 
     let mut entries = Vec::new();
 
-    for &s in sizes {
-        let resized = if s == 256 {
-            base_img.clone()
-        } else {
-            image::imageops::resize(base_img, s, s, FilterType::Lanczos3)
-        };
+    for (s, resized) in images {
+        let s = *s;
 
         if s >= 256 {
             // Encode as RGBA PNG
             let mut buf = Cursor::new(Vec::new());
-            DynamicImage::ImageRgba8(resized)
+            DynamicImage::ImageRgba8(resized.clone())
                 .write_to(&mut buf, ImageFormat::Png)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             entries.push(IcoEntry {
