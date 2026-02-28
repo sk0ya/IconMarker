@@ -54,8 +54,8 @@ fn draw_chevron_pattern(img: &mut RgbaImage, _base: Color32, size: u32) {
     let width = size as i32;
     let height = size as i32;
 
-    let spacing = 6;          // 線の間隔
-    let zigzag_period = 20;   // ジグザグ1周期の幅（px）
+    let spacing = 6; // 線の間隔
+    let zigzag_period = 20; // ジグザグ1周期の幅（px）
 
     for y in 0..height {
         for x in 0..width {
@@ -68,25 +68,32 @@ fn draw_chevron_pattern(img: &mut RgbaImage, _base: Color32, size: u32) {
 
             if pattern_y == 0 {
                 // 微かなハイライト線
-                img.put_pixel(x as u32, y as u32, Rgba([
-                    bg[0].saturating_add(10),
-                    bg[1].saturating_add(10),
-                    bg[2].saturating_add(10),
-                    255,
-                ]));
+                img.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgba([
+                        bg[0].saturating_add(10),
+                        bg[1].saturating_add(10),
+                        bg[2].saturating_add(10),
+                        255,
+                    ]),
+                );
             } else if pattern_y == 1 {
                 // ハイライト直下の微かなシャドウで立体感を出す
-                img.put_pixel(x as u32, y as u32, Rgba([
-                    bg[0].saturating_sub(6),
-                    bg[1].saturating_sub(6),
-                    bg[2].saturating_sub(6),
-                    255,
-                ]));
+                img.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgba([
+                        bg[0].saturating_sub(6),
+                        bg[1].saturating_sub(6),
+                        bg[2].saturating_sub(6),
+                        255,
+                    ]),
+                );
             }
         }
     }
 }
-
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -120,7 +127,7 @@ impl IconMarkerApp {
             bg_color: Color32::from_rgb(242, 220, 198),
             grad_start: Color32::from_rgb(120, 90, 220),
             grad_end: Color32::from_rgb(20, 170, 130),
-            padding: 0.16,
+            padding: 0.1,
             chevron_on: true,
             texture: None,
             needs_update: true,
@@ -131,7 +138,12 @@ impl IconMarkerApp {
 
     /// Measure the actual pixel bounding box of text rendered at a given scale.
     /// Returns (min_x, min_y, max_x, max_y) of non-transparent pixels, or None.
-    fn measure_text_bbox(font: &FontVec, text: &str, scale: f32, canvas: u32) -> Option<(u32, u32, u32, u32)> {
+    fn measure_text_bbox(
+        font: &FontVec,
+        text: &str,
+        scale: f32,
+        canvas: u32,
+    ) -> Option<(u32, u32, u32, u32)> {
         let white = Rgba([255u8, 255, 255, 255]);
         let mut tmp = RgbaImage::from_pixel(canvas, canvas, Rgba([0, 0, 0, 0]));
         draw_text_mut(&mut tmp, white, 0, 0, PxScale::from(scale), font, text);
@@ -181,8 +193,12 @@ impl IconMarkerApp {
         let ref_w = (bbox.2 - bbox.0 + 1) as f32;
         let ref_h = (bbox.3 - bbox.1 + 1) as f32;
 
-        // Step 2: Calculate scale to fill canvas with padding
-        let target = size as f32 * (1.0 - self.padding * 2.0);
+        // Step 2: Calculate scale to fill the padded inner area
+        let size_i32 = size as i32;
+        let pad_px = ((size as f32) * self.padding).round() as i32;
+        let pad_px = pad_px.clamp(0, size_i32 / 2);
+        let inner_space = (size_i32 - pad_px * 2).max(1);
+        let target = inner_space as f32;
         let ratio = (target / ref_w).min(target / ref_h);
         let final_scale = ref_scale * ratio;
 
@@ -190,7 +206,15 @@ impl IconMarkerApp {
         let white = Rgba([255u8, 255, 255, 255]);
         let tmp_size = size * 2;
         let mut text_layer = RgbaImage::from_pixel(tmp_size, tmp_size, Rgba([0, 0, 0, 0]));
-        draw_text_mut(&mut text_layer, white, 0, 0, PxScale::from(final_scale), font, &self.text);
+        draw_text_mut(
+            &mut text_layer,
+            white,
+            0,
+            0,
+            PxScale::from(final_scale),
+            font,
+            &self.text,
+        );
 
         // Find actual bounds at final scale
         let mut min_x = tmp_size;
@@ -208,23 +232,37 @@ impl IconMarkerApp {
             }
         }
 
-        // Step 4: Calculate offset to center the actual glyph pixels
+        // Step 4: Crop glyph pixels and target their position within the padded box
         let glyph_w = max_x - min_x + 1;
         let glyph_h = max_y - min_y + 1;
-        let offset_x = (size - glyph_w) as i32 / 2 - min_x as i32;
-        let offset_y = (size - glyph_h) as i32 / 2 - min_y as i32;
+
+        let mut glyph_layer = RgbaImage::from_pixel(glyph_w, glyph_h, Rgba([0, 0, 0, 0]));
+        for oy in 0..glyph_h {
+            for ox in 0..glyph_w {
+                let src_pix = text_layer.get_pixel(min_x + ox, min_y + oy);
+                glyph_layer.put_pixel(ox, oy, *src_pix);
+            }
+        }
+
+        let x_margin = (inner_space - glyph_w as i32).max(0);
+        let y_margin = (inner_space - glyph_h as i32).max(0);
+        let mut target_x = pad_px + (inner_space - glyph_w as i32) / 2;
+        let mut target_y = pad_px + (inner_space - glyph_h as i32) / 2;
+        target_x = target_x.clamp(pad_px, pad_px + x_margin);
+        target_y = target_y.clamp(pad_px, pad_px + y_margin);
 
         // Step 5: Composite text with gradient onto background, applying offset
         for y in 0..size {
             for x in 0..size {
-                let src_x = x as i32 - offset_x;
-                let src_y = y as i32 - offset_y;
-                if src_x < 0 || src_y < 0 || src_x >= tmp_size as i32 || src_y >= tmp_size as i32 {
+                let src_x = x as i32 - target_x;
+                let src_y = y as i32 - target_y;
+                if src_x < 0 || src_y < 0 || src_x >= glyph_w as i32 || src_y >= glyph_h as i32 {
                     continue;
                 }
-                let tp = text_layer.get_pixel(src_x as u32, src_y as u32);
+                let tp = glyph_layer.get_pixel(src_x as u32, src_y as u32);
                 if tp[3] > 0 {
-                    let t = ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32)).clamp(0.0, 1.0);
+                    let t = ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32))
+                        .clamp(0.0, 1.0);
                     let grad = lerp_color(self.grad_start, self.grad_end, t);
                     let alpha = tp[3] as f32 / 255.0;
                     let bg_px = img.get_pixel(x, y);
@@ -266,11 +304,9 @@ impl IconMarkerApp {
             .save_file()
         {
             let path = ensure_extension(path, "ico");
-            let sizes: &[u32] = &[16, 32, 48, 256];
-            let images: Vec<(u32, RgbaImage)> = sizes
-                .iter()
-                .map(|&s| (s, self.generate_image(s)))
-                .collect();
+            let sizes: &[u32] = &[16, 24, 32, 48, 64, 72, 96, 128, 256];
+            let images: Vec<(u32, RgbaImage)> =
+                sizes.iter().map(|&s| (s, self.generate_image(s))).collect();
 
             match write_ico(&path, &images) {
                 Ok(_) => self.status_msg = format!("ICO saved: {}", path.display()),
@@ -286,11 +322,8 @@ impl IconMarkerApp {
         match &mut self.texture {
             Some(tex) => tex.set(color_image, TextureOptions::NEAREST),
             None => {
-                self.texture = Some(ctx.load_texture(
-                    "icon-preview",
-                    color_image,
-                    TextureOptions::NEAREST,
-                ));
+                self.texture =
+                    Some(ctx.load_texture("icon-preview", color_image, TextureOptions::NEAREST));
             }
         }
         self.needs_update = false;
@@ -323,7 +356,10 @@ impl eframe::App for IconMarkerApp {
                     });
 
                     ui.add_space(4.0);
-                    if ui.checkbox(&mut self.chevron_on, "Chevron pattern").changed() {
+                    if ui
+                        .checkbox(&mut self.chevron_on, "Chevron pattern")
+                        .changed()
+                    {
                         self.needs_update = true;
                     }
 
@@ -388,14 +424,12 @@ impl eframe::App for IconMarkerApp {
 
 /// Write an ICO file with multiple sizes.
 /// Each image must already be rendered at the correct size.
-/// Small sizes use 32-bit BGRA BMP DIB, 256x256 uses RGBA PNG.
-fn write_ico(
-    path: &std::path::Path,
-    images: &[(u32, RgbaImage)],
-) -> std::io::Result<()> {
-    // Prepare image data for each size
+/// All sizes are stored as PNG (Vista+ compatible). This avoids BMP DIB header
+/// issues (biHeight doubling, AND mask requirements) that cause rendering glitches
+/// on Windows, such as the top of the icon being clipped.
+fn write_ico(path: &std::path::Path, images: &[(u32, RgbaImage)]) -> std::io::Result<()> {
     struct IcoEntry {
-        width: u8,  // 0 means 256
+        width: u8, // 0 means 256
         height: u8,
         planes: u16,
         bpp: u16,
@@ -407,59 +441,18 @@ fn write_ico(
     for (s, resized) in images {
         let s = *s;
 
-        if s >= 256 {
-            // Encode as RGBA PNG
-            let mut buf = Cursor::new(Vec::new());
-            DynamicImage::ImageRgba8(resized.clone())
-                .write_to(&mut buf, ImageFormat::Png)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            entries.push(IcoEntry {
-                width: 0,
-                height: 0,
-                planes: 1,
-                bpp: 32,
-                data: buf.into_inner(),
-            });
-        } else {
-            // Encode as 32-bit BGRA BMP DIB
-            let mut data = Vec::new();
-
-            // BITMAPINFOHEADER (40 bytes)
-            // Vista-style 32-bit ICO: biHeight = actual height (not doubled),
-            // no AND mask — transparency is carried by the alpha channel.
-            let pixel_bytes = (s * s * 4) as u32;
-            data.extend_from_slice(&40u32.to_le_bytes()); // biSize
-            data.extend_from_slice(&(s as i32).to_le_bytes()); // biWidth
-            data.extend_from_slice(&(s as i32).to_le_bytes()); // biHeight (actual, not doubled)
-            data.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
-            data.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
-            data.extend_from_slice(&0u32.to_le_bytes()); // biCompression (BI_RGB)
-            data.extend_from_slice(&pixel_bytes.to_le_bytes()); // biSizeImage
-            data.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
-            data.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
-            data.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
-            data.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
-
-            // Pixel data: BGRA, bottom-up row order
-            for row in (0..s).rev() {
-                for col in 0..s {
-                    let px = resized.get_pixel(col, row);
-                    data.push(px[2]); // B
-                    data.push(px[1]); // G
-                    data.push(px[0]); // R
-                    data.push(px[3]); // A
-                }
-            }
-            // No AND mask: 32-bit Vista-style ICO uses alpha channel instead.
-
-            entries.push(IcoEntry {
-                width: s as u8,
-                height: s as u8,
-                planes: 1,
-                bpp: 32,
-                data,
-            });
-        }
+        // Encode all sizes as PNG — clean, no BMP header pitfalls.
+        let mut buf = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(resized.clone())
+            .write_to(&mut buf, ImageFormat::Png)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        entries.push(IcoEntry {
+            width: if s >= 256 { 0 } else { s as u8 },
+            height: if s >= 256 { 0 } else { s as u8 },
+            planes: 1,
+            bpp: 32,
+            data: buf.into_inner(),
+        });
     }
 
     // Write ICO file
@@ -494,7 +487,10 @@ fn write_ico(
 }
 
 fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
+    if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+    {
         path
     } else {
         path.with_extension(ext)

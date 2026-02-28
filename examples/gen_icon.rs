@@ -55,25 +55,38 @@ fn draw_chevron_pattern(img: &mut RgbaImage, size: u32) {
             let bg = *img.get_pixel(x as u32, y as u32);
 
             if pattern_y == 0 {
-                img.put_pixel(x as u32, y as u32, Rgba([
-                    bg[0].saturating_add(10),
-                    bg[1].saturating_add(10),
-                    bg[2].saturating_add(10),
-                    255,
-                ]));
+                img.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgba([
+                        bg[0].saturating_add(10),
+                        bg[1].saturating_add(10),
+                        bg[2].saturating_add(10),
+                        255,
+                    ]),
+                );
             } else if pattern_y == 1 {
-                img.put_pixel(x as u32, y as u32, Rgba([
-                    bg[0].saturating_sub(6),
-                    bg[1].saturating_sub(6),
-                    bg[2].saturating_sub(6),
-                    255,
-                ]));
+                img.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgba([
+                        bg[0].saturating_sub(6),
+                        bg[1].saturating_sub(6),
+                        bg[2].saturating_sub(6),
+                        255,
+                    ]),
+                );
             }
         }
     }
 }
 
-fn measure_text_bbox(font: &FontVec, text: &str, scale: f32, canvas: u32) -> Option<(u32, u32, u32, u32)> {
+fn measure_text_bbox(
+    font: &FontVec,
+    text: &str,
+    scale: f32,
+    canvas: u32,
+) -> Option<(u32, u32, u32, u32)> {
     let white = Rgba([255u8, 255, 255, 255]);
     let mut tmp = RgbaImage::from_pixel(canvas, canvas, Rgba([0, 0, 0, 0]));
     draw_text_mut(&mut tmp, white, 0, 0, PxScale::from(scale), font, text);
@@ -126,7 +139,15 @@ fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
     let white = Rgba([255u8, 255, 255, 255]);
     let tmp_size = size * 2;
     let mut text_layer = RgbaImage::from_pixel(tmp_size, tmp_size, Rgba([0, 0, 0, 0]));
-    draw_text_mut(&mut text_layer, white, 0, 0, PxScale::from(final_scale), font, text);
+    draw_text_mut(
+        &mut text_layer,
+        white,
+        0,
+        0,
+        PxScale::from(final_scale),
+        font,
+        text,
+    );
 
     let mut min_x = tmp_size;
     let mut min_y = tmp_size;
@@ -157,7 +178,8 @@ fn generate_image(font: &FontVec, text: &str, size: u32) -> RgbaImage {
             }
             let tp = text_layer.get_pixel(src_x as u32, src_y as u32);
             if tp[3] > 0 {
-                let t = ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32)).clamp(0.0, 1.0);
+                let t =
+                    ((x as f32 + (size as f32 - y as f32)) / (2.0 * size as f32)).clamp(0.0, 1.0);
                 let grad = lerp_color(grad_start, grad_end, t);
                 let alpha = tp[3] as f32 / 255.0;
                 let bg_px = img.get_pixel(x, y);
@@ -193,11 +215,7 @@ fn main() {
 
 /// Write an ICO file with multiple sizes.
 /// Small sizes use 32-bit BGRA BMP DIB, 256x256 uses RGBA PNG.
-fn write_ico(
-    path: &str,
-    base_img: &RgbaImage,
-    sizes: &[u32],
-) -> std::io::Result<()> {
+fn write_ico(path: &str, base_img: &RgbaImage, sizes: &[u32]) -> std::io::Result<()> {
     struct IcoEntry {
         width: u8,
         height: u8,
